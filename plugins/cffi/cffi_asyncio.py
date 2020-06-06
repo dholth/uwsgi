@@ -851,7 +851,7 @@ def _uwsgi_cffi_request(wsgi_req):
     try:
         response = app(environ, start_response)
     except:
-        print("app exception")
+        print_exc()
         # can I get a 500?
         # will also get here when a websocket closes
         wsgi_req.async_force_again = 1
