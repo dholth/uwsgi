@@ -8,11 +8,11 @@ import asyncio
 import inspect
 import greenlet
 
-from _uwsgi import ffi, lib
+from _uwsgi import ffi, lib, _applications
 
 uwsgi = lib.uwsgi
 
-wsgi_apps = sys.modules["wsgi_apps"]  # hack
+wsgi_apps = _applications
 
 
 def get_loop():
@@ -462,7 +462,7 @@ def asgi_scope_http(wsgi_req):
         "asgi": {"spec_version": "2.1"},
         "http_version": environ["SERVER_PROTOCOL"][len("HTTP/") :].decode("utf-8"),
         "method": environ["REQUEST_METHOD"].decode("utf-8"),
-        "scheme": environ.get("UWSGI_SCHEME", "http"),
+        "scheme": "http",
         "path": environ["PATH_INFO"].decode("utf-8"),
         "raw_path": environ["REQUEST_URI"],
         "query_string": environ["QUERY_STRING"],
@@ -471,7 +471,11 @@ def asgi_scope_http(wsgi_req):
         # some references to REMOTE_PORT but not always in environ
         "client": (environ["REMOTE_ADDR"].decode("utf-8"), 0),
         "server": (environ["SERVER_NAME"].decode("utf-8"), environ["SERVER_PORT"]),
+        "environ": environ,
     }
+
+    if environ.get("HTTPS") in (b"on",):
+        scope["scheme"] = "https"
 
     if wsgi_req.http_sec_websocket_key != ffi.NULL:
         scope["type"] = "websocket"
