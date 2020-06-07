@@ -9,16 +9,26 @@ import importlib
 import sys
 import os
 import inspect
+import types
 
 import cffi_plugin
 
 from cffi_plugin import ffi, lib
 from cffi_plugin.lib import *
 
-# predictable name
-sys.modules["_uwsgi"] = cffi_plugin
 
-print("cffi_init", __name__)
+class UwsgiModule(types.ModuleType):
+    pass
+
+
+_uwsgi = UwsgiModule("uwsgi")
+_uwsgi.lib = lib
+_uwsgi.ffi = ffi
+_uwsgi._applications = {}
+# predictable name
+sys.modules["_uwsgi"] = _uwsgi
+
+wsgi_apps = _uwsgi._applications
 
 
 def print_exc():
@@ -33,6 +43,8 @@ def to_network(native):
 
 @ffi.def_extern()
 def uwsgi_cffi_init():
+    global wsgi_apps
+
     # pypy will find environment from current working directory
     # (uwsgi --chdir $VIRTUAL_ENV/bin)
     if "PYTHONPATH" in os.environ:
@@ -293,9 +305,6 @@ def uwsgi_apps_cnt():
 
 def uwsgi_apps():
     return lib.uwsgi.workers[lib.uwsgi.mywid].apps
-
-
-wsgi_apps = {}
 
 
 def iscoroutine(app):
