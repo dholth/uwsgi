@@ -10,6 +10,8 @@ from _uwsgi import ffi, lib
 # this is a list holding object we do not want to be freed (like callback and handlers)
 uwsgi_gc = []
 
+applications = {}  # TODO
+
 # latin1 might be better
 hostname = ffi.string(lib.uwsgi.hostname, lib.uwsgi.hostname_len).decode("utf-8")
 numproc = lib.uwsgi.numproc
@@ -90,10 +92,7 @@ def register_rpc(name, func, argc=0):
     uwsgi_gc.append(cb)
     if (
         lib.uwsgi_register_rpc(
-            ffi.new("char[]", name.encode("utf-8")),
-            ffi.addressof(lib.cffi_plugin),
-            argc,
-            cb,
+            ffi.new("char[]", name), ffi.addressof(lib.cffi_plugin), argc, cb,
         )
         < 0
     ):
@@ -462,17 +461,27 @@ def websocket_recv_nb():
     return ret
 
 
-def websocket_handshake(key="", origin="", proto=""):
+def websocket_handshake(key=None, origin=None, proto=None):
     """
     uwsgi.websocket_handshake(key, origin)
     """
     wsgi_req = _current_wsgi_req()
-    c_key = ffi.new("char[]", key.encode("latin1"))  # correct encoding?
-    c_origin = ffi.new("char[]", origin.encode("latin1"))
+    len_key = 0
+    len_origin = 0
+    len_proto = 0
+    c_key = ffi.NULL
+    c_origin = ffi.NULL
+    c_proto = ffi.NULL
+    if key != ffi.NULL:
+        len_key = len(key)
+        c_key = ffi.new("char[]", key.encode("latin1"))  # correct encoding?
+    if origin != ffi.NULL:
+        len_origin = len(origin)
+        c_origin = ffi.new("char[]", origin.encode("latin1"))
     c_proto = ffi.new("char[]", proto.encode("latin1"))
     if (
         lib.uwsgi_websocket_handshake(
-            wsgi_req, c_key, len(key), c_origin, len(origin), c_proto, len(proto)
+            wsgi_req, c_key, len_key, c_origin, len_origin, c_proto, len_proto
         )
         < 0
     ):
