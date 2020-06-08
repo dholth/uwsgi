@@ -6,6 +6,7 @@ from starlette.routing import Route, Mount, WebSocketRoute
 import os
 import asyncio
 import asyncio_redis
+import trio_asyncio
 
 
 def get_template():
@@ -80,10 +81,19 @@ async def redis_subscribe():
     return subscriber
 
 
-app = Starlette(
-    debug=True,
+app_to_wrap = Starlette(
+    debug=False,
     routes=[Route("/", homepage), WebSocketRoute("/foobar/", chat_endpoint)],
 )
+
+
+async def app(scope, receive, send):
+    async with trio_asyncio.open_loop() as loop:
+        # async part of your main program here
+        receive_ = trio_asyncio.trio_as_aio(receive)
+        send_ = trio_asyncio.trio_as_aio(send)
+        await trio_asyncio.aio_as_trio(app_to_wrap)(scope, receive_, send_)
+
 
 import sys
 
