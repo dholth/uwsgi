@@ -321,12 +321,14 @@ def init_app(app, mountpoint):
     id = uwsgi_apps_cnt()
 
     if id >= lib.uwsgi.max_apps:
-        lib.uwsgi_log(b"ERROR: you cannot load more than %d apps in a worker\n" % uwsgi.max_apps)
+        lib.uwsgi_log(
+            b"ERROR: you cannot load more than %d apps in a worker\n" % uwsgi.max_apps
+        )
         return -1
 
-    if len(mountpoint) > 0xff - 1:
+    if len(mountpoint) > 0xFF - 1:
         # original uses prefix for very long mountpoints
-        lib.uwsgi_log(b"ERROR: mountpoint must be shorter than %d bytes\n" % 0xff - 1)
+        lib.uwsgi_log(b"ERROR: mountpoint must be shorter than %d bytes\n" % 0xFF - 1)
 
     if lib.uwsgi_get_app_id(ffi.NULL, mountpoint, len(mountpoint), -1) != -1:
         lib.uwsgi_log(b"mountpoint %s already configured. skip.\n" % mountpoint)
@@ -355,10 +357,10 @@ def init_app(app, mountpoint):
         wsgi_apps[id] = uwsgi_pypy_loader(application)
 
     # callable has to be not NULL for uwsgi_get_app_id:
-    app_type = 'WSGI'
+    app_type = "WSGI"
     wi.callable = ffi.cast("void *", 1)
     if iscoroutine(wsgi_apps[id]):
-        app_type = 'ASGI'
+        app_type = "ASGI"
         wi.callable = ffi.cast("void *", 2)
     wi.started_at = now
     wi.startup_time = lib.uwsgi_now() - now
