@@ -13,6 +13,11 @@ plugin_data = """
 static struct uwsgi_cffi {
 	char *wsgi;
     char *init;
+
+    struct uwsgi_string_list *eval;
+	struct uwsgi_string_list *eval_post_fork;
+	struct uwsgi_string_list *exec;
+	struct uwsgi_string_list *exec_post_fork;
 } ucffi;
 """
 
@@ -85,8 +90,12 @@ extern void uwsgi_cffi_more_apps() {
 }
 
 static struct uwsgi_option uwsgi_cffi_options[] = {
-    {"cffi-wsgi", required_argument, 0, "load a WSGI module", uwsgi_opt_set_str, &ucffi.wsgi, 0},
-    {"cffi-init", required_argument, 0, "load a module during init (define or override callbacks)", uwsgi_opt_set_str, &ucffi.init, 0},
+    {"cffi-wsgi", required_argument, 0, "load a WSGI module (or use --mount instead)", uwsgi_opt_set_str, &ucffi.wsgi, 0},
+    {"cffi-init", required_argument, 0, "load a module during init", uwsgi_opt_set_str, &ucffi.init, 0},
+    {"cffi-eval", required_argument, 0, "evaluate Python code before fork()", uwsgi_opt_add_string_list, &ucffi.eval, 0},
+    {"cffi-eval-post-fork", required_argument, 0, "evaluate Python code soon after fork()", uwsgi_opt_add_string_list, &ucffi.eval_post_fork, 0},
+	{"cffi-exec", required_argument, 0, "execute Python code from file before fork()", uwsgi_opt_add_string_list, &ucffi.exec, 0},
+	{"cffi-exec-post-fork", required_argument, 0, "execute Python code from file soon after fork()", uwsgi_opt_add_string_list, &ucffi.exec_post_fork, 0},
 	{0, 0, 0, 0, 0, 0, 0},
 };
 
