@@ -32,7 +32,7 @@ def asgi_scope_http(wsgi_req):
         )
         if key.startswith(b"HTTP_"):
             # replace cgi-style _ with http-style -
-            headers.append((key[5:].lower().replace(b'_', b'-'), value))
+            headers.append((key[5:].lower().replace(b"_", b"-"), value))
         else:
             environ[key.decode("ascii")] = value
 

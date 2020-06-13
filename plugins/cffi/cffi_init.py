@@ -50,7 +50,7 @@ def uwsgi_cffi_init():
     if "PYTHONPATH" in os.environ:
         sys.path[0:0] = os.environ["PYTHONPATH"].split(os.pathsep)
 
-    # define or override callbacks
+    # define or override callbacks?
     if lib.ucffi.init:
         init_name = ffi.string(lib.ucffi.init).decode("utf-8")
         importlib.import_module(init_name)
@@ -60,6 +60,9 @@ def uwsgi_cffi_init():
 
 @ffi.def_extern()
 def uwsgi_cffi_init_apps():
+    """
+    (The --mount= syntax is more general.)
+    """
     try:
         if lib.ucffi.wsgi:
             init_app(ffi.string(lib.ucffi.wsgi), b"")
@@ -282,9 +285,31 @@ def uwsgi_cffi_after_request(wsgi_req):
     lib.log_request(wsgi_req)
 
 
+def uwsgi_foreach(usl):
+    # define uwsgi_foreach(x, y) for(x=y;x;x = x->next)
+    while usl != ffi.NULL:
+        yield usl
+        usl = usl.next
+
+
+def execfile(path):
+    with open(path) as py:
+        code = compile(py.read(), path, "exec")
+    exec(code, globals(), {})
+
+
+def eval_exec(to_eval, to_exec):
+    for usl in uwsgi_foreach(to_eval):
+        code = compile(ffi.string(usl.value), "<eval>", "eval")
+        exec(code, globals(), {})
+
+    for usl in uwsgi_foreach(to_exec):
+        execfile(ffi.string(usl.value))
+
+
 @ffi.def_extern()
 def uwsgi_cffi_preinit_apps():
-    pass
+    eval_exec(lib.ucffi.eval, lib.ucffi.exec)
 
 
 @ffi.def_extern()
@@ -292,6 +317,8 @@ def uwsgi_cffi_post_fork():
     """
     .post_fork_hook
     """
+    eval_exec(lib.ucffi.eval_post_fork, lib.ucffi.exec_post_fork)
+
     import uwsgi
 
     if hasattr(uwsgi, "post_fork_hook"):
