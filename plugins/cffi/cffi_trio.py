@@ -8,10 +8,10 @@ import trio
 import inspect
 import greenlet
 
+from cffi_asgi import asgi_scope_http, asgi_start_response
 from _uwsgi import ffi, lib, _applications
 
 uwsgi = lib.uwsgi
-
 wsgi_apps = _applications
 
 
@@ -28,6 +28,110 @@ def request_id():
 
 # keep alive
 _TRIO = ffi.new("char[]", "trio".encode("utf-8"))
+
+
+# Timeouts. Check periodically with just one task.
+# from the Python documentation
+from heapq import heappush, heappop
+import itertools
+
+pq = []  # list of entries arranged in a heap
+entry_finder = {}  # mapping of tasks to entries
+REMOVED = "<removed-task>"  # placeholder for a removed task
+counter = itertools.count()  # unique sequence count
+
+
+def add_task(task, priority=0):
+    "Add a new task or update the priority of an existing task"
+    if task in entry_finder:
+        remove_task(task)
+    count = next(counter)
+    entry = [priority, count, task]
+    entry_finder[task] = entry
+    heappush(pq, entry)
+
+
+def remove_task(task):
+    "Mark an existing task as REMOVED.  Raise KeyError if not found."
+    entry = entry_finder.pop(task)
+    entry[-1] = REMOVED
+
+
+def pop_task():
+    "Remove and return the lowest priority task. Raise KeyError if empty."
+    while pq:
+        priority, count, task = heappop(pq)
+        if task is not REMOVED:
+            del entry_finder[task]
+            return task
+    raise KeyError("pop from an empty priority queue")
+
+
+# there are two kinds of timeouts, a hook timeout which
+# marks the request as timed out and a socket timeout which
+# loops into the request handler with timed_out = True
+class Timeout:
+    def __init__(self, wsgi_req, deadline):
+        self.wsgi_req = wsgi_req
+        # don't fire timeout if wsgi_req was recycled
+        self.request_id = (wsgi_req.async_id, request_id())
+        self.deadline = deadline
+
+    def fire(self, now):
+        if self.deadline > now:
+            add_task(self, priority=self.deadline)
+        else:
+            print("timeout!")
+            uwsgi_trio_request(wsgi_req, True)
+
+
+class HookTimeout(Timeout):
+    def fire(self, now):
+        if self.deadline > now:
+            add_task(self, priority=self.deadline)
+        else:
+            print("hook timeout!")
+            uwsgi_asyncio_hook_timeout(wsgi_req)
+
+
+async def timeout_task():
+    """
+    Check timeouts periodically
+    """
+    while True:
+        await trio.sleep(1)
+        now = lib.uwsgi_now()
+        while True:
+            try:
+                task = pop_task()
+            except KeyError:
+                break
+            # will reschedule self if needed
+            task.fire(now)
+
+
+timeout_handles = {}
+
+
+def timeout_after(wsgi_req, seconds):
+    return
+    deadline = lib.uwsgi_now() + seconds
+    timeout = Timeout(wsgi_req, deadline)
+    timeout_handles[wsgi_req.async_id] = timeout
+    add_task(timeout, deadline)
+
+
+def hook_timeout_after(wsgi_req, seconds):
+    deadline = lib.uwsgi_now() + seconds
+    timeout = HookTimeout(wsgi_req, deadline)
+    timeout_handles[wsgi_req.async_id] = timeout
+    add_task(timeout, deadline)
+
+
+def timeout_cancel(wsgi_req):
+    return
+    handle = timeout_handles.pop(wsgi_req.async_id)
+    remove_task(handle)
 
 
 def print_exc():
@@ -49,10 +153,11 @@ def free_req_queue(wsgi_req):
 def uwsgi_asyncio_wait_read_hook(fd, timeout):
     print("enter read hook")
     wsgi_req = uwsgi.current_wsgi_req()
-    loop = get_loop()
-    loop.add_reader(fd, uwsgi_asyncio_hook_fd, wsgi_req)
+    # TODO
+    # loop = get_loop()
+    # loop.add_reader(fd, uwsgi_asyncio_hook_fd, wsgi_req)
     try:
-        ob_timeout = loop.call_later(timeout, hook_timeout, wsgi_req)
+        hook_timeout_after(wsgi_req, timeout)
         try:
 
             # to loop
@@ -63,7 +168,7 @@ def uwsgi_asyncio_wait_read_hook(fd, timeout):
                 print("no read hook", uwsgi.schedule_to_main)
             # from loop
         finally:
-            ob_timeout.cancel()
+            timeout_cancel(wsgi_req)
 
         if wsgi_req.async_timed_out:
             return 0
@@ -83,10 +188,11 @@ def uwsgi_asyncio_wait_read_hook(fd, timeout):
 def uwsgi_asyncio_wait_write_hook(fd, timeout):
     print("enter write hook")
     wsgi_req = uwsgi.current_wsgi_req()
-    loop = get_loop()
-    loop.add_writer(fd, uwsgi_asyncio_hook_fd, wsgi_req)
+    # TODO
+    # loop = get_loop()
+    # loop.add_writer(fd, uwsgi_asyncio_hook_fd, wsgi_req)
     try:
-        ob_timeout = loop.call_later(timeout, hook_timeout, wsgi_req)
+        hook_timeout_after(wsgi_req, timeout)
         try:
             # to loop
             if uwsgi.schedule_to_main:
@@ -95,7 +201,7 @@ def uwsgi_asyncio_wait_write_hook(fd, timeout):
             # from loop
 
         finally:
-            ob_timeout.cancel()
+            timeout_cancel(wsgi_req)
 
         if wsgi_req.async_timed_out:
             return 0
@@ -125,17 +231,16 @@ def uwsgi_trio_request(wsgi_req, timed_out) -> int:
     try:
         uwsgi.wsgi_req = wsgi_req
 
-        # ob_timeout = get_ob_timeout(wsgi_req)
-        # ob_timeout.cancel()
-
         if timed_out > 0:
             raise IOError("timed out")  # goto end
+
+        # already cancelled if timed_out (probably)
+        timeout_cancel(wsgi_req)
 
         status = wsgi_req.socket.proto(wsgi_req)
 
         if status > 0:
-            # refresh the timeout
-            print("again a", request_id())
+            timeout_after(wsgi_req, uwsgi.socket_timeout)
             return status
 
         else:
@@ -144,18 +249,17 @@ def uwsgi_trio_request(wsgi_req, timed_out) -> int:
                 # we call this two time... overengineering :(
                 uwsgi.async_proto_fd_table[wsgi_req.fd] = ffi.NULL
                 uwsgi.schedule_to_req()
-                print("again b", request_id())
+                # print("again b", request_id())
                 return status
 
     except IOError:
-        loop.remove_reader(wsgi_req.fd)
+        # (stop reading from the fd - not needed in trio)
         print_exc()
 
     except:
         print_exc()
 
     # end
-    r_id = request_id()
     uwsgi.async_proto_fd_table[wsgi_req.fd] = ffi.NULL
     lib.uwsgi_close_request(uwsgi.wsgi_req)
     free_req_queue(wsgi_req)
@@ -172,7 +276,6 @@ def uwsgi_trio_accept(uwsgi_sock, nursery):
     wsgi_req = find_first_available_wsgi_req()
     if wsgi_req == ffi.NULL:
         lib.uwsgi_async_queue_is_full(lib.uwsgi_now())
-        print("queue is full")
         return None
 
     # we should possibly be in the per-request greenthread here
@@ -184,7 +287,6 @@ def uwsgi_trio_accept(uwsgi_sock, nursery):
     if lib.wsgi_req_simple_accept(wsgi_req, uwsgi_sock.fd):
         uwsgi.workers[uwsgi.mywid].cores[wsgi_req.async_id].in_request = 0
         free_req_queue(wsgi_req)
-        print("no accept")
         return None
 
     wsgi_req.start_of_request = lib.uwsgi_micros()
@@ -197,6 +299,8 @@ def uwsgi_trio_accept(uwsgi_sock, nursery):
     uwsgi.async_proto_fd_table[wsgi_req.fd] = wsgi_req
 
     nursery.start_soon(request_task, wsgi_req.fd, uwsgi_trio_request, wsgi_req, False)
+
+    timeout_after(wsgi_req, uwsgi.socket_timeout)
 
 
 def uwsgi_asyncio_hook_fd(wsgi_req):
@@ -242,7 +346,6 @@ async def reader_task(fd, callback, *args):
     while True:
         await trio.lowlevel.wait_readable(fd)
         callback(*args)
-        print("back from callback")
 
 
 async def writer_task(fd, callable, *args):
@@ -263,6 +366,7 @@ async def server(sockets):
     global _trio_token
     _trio_token = trio.lowlevel.current_trio_token()
     async with trio.open_nursery() as nursery:
+        nursery.start_soon(timeout_task)
         for uwsgi_sock in sockets:
             nursery.start_soon(
                 reader_task, uwsgi_sock.fd, uwsgi_trio_accept, uwsgi_sock, nursery
@@ -421,62 +525,6 @@ class WSGIinput(object):
         return chunk
 
 
-def asgi_start_response(wsgi_req, status, headers):
-    status = b"%d" % status
-    lib.uwsgi_response_prepare_headers(wsgi_req, ffi.new("char[]", status), len(status))
-    for (header, value) in headers:
-        lib.uwsgi_response_add_header(
-            wsgi_req,
-            ffi.new("char[]", header),
-            len(header),
-            ffi.new("char[]", value),
-            len(value),
-        )
-
-
-def asgi_scope_http(wsgi_req):
-    """
-    Create the ASGI scope for a http or websockets connection.
-    """
-    environ = {}
-    headers = []
-    iov = wsgi_req.hvec
-    for i in range(0, wsgi_req.var_cnt, 2):
-        key, value = (
-            ffi.string(ffi.cast("char*", iov[i].iov_base), iov[i].iov_len),
-            ffi.string(ffi.cast("char*", iov[i + 1].iov_base), iov[i + 1].iov_len),
-        )
-        if key.startswith(b"HTTP_"):
-            headers.append((key[5:].lower(), value))
-        else:
-            environ[key.decode("ascii")] = value
-
-    scope = {
-        "type": "http",
-        "asgi": {"spec_version": "2.1"},
-        "http_version": environ["SERVER_PROTOCOL"][len("HTTP/") :].decode("utf-8"),
-        "method": environ["REQUEST_METHOD"].decode("utf-8"),
-        "scheme": "http",
-        "path": environ["PATH_INFO"].decode("utf-8"),
-        "raw_path": environ["REQUEST_URI"],
-        "query_string": environ["QUERY_STRING"],
-        "root_path": environ["SCRIPT_NAME"].decode("utf-8"),
-        "headers": headers,
-        # some references to REMOTE_PORT but not always in environ
-        "client": (environ["REMOTE_ADDR"].decode("utf-8"), 0),
-        "server": (environ["SERVER_NAME"].decode("utf-8"), environ["SERVER_PORT"]),
-        "environ": environ,
-    }
-
-    if environ.get("HTTPS") in (b"on",):
-        scope["scheme"] = "https"
-
-    if wsgi_req.http_sec_websocket_key != ffi.NULL:
-        scope["type"] = "websocket"
-
-    return scope
-
-
 def websocket_recv_nb(wsgi_req):
     """
     uwsgi.websocket_recv_nb()
@@ -489,6 +537,23 @@ def websocket_recv_nb(wsgi_req):
     return ret
 
 
+async def race(*async_fns):
+    if not async_fns:
+        raise ValueError("must pass at least one argument")
+
+    send_channel, receive_channel = trio.open_memory_channel(0)
+
+    async def jockey(async_fn):
+        await send_channel.send(await async_fn())
+
+    async with trio.open_nursery() as nursery:
+        for async_fn in async_fns:
+            nursery.start_soon(jockey, async_fn)
+        winner = await receive_channel.receive()
+        nursery.cancel_scope.cancel()
+        return winner
+
+
 def handle_asgi_request(wsgi_req, app):
     """
     Handle asgi request, with synchronous code, in the per-request greenlet.
@@ -496,8 +561,15 @@ def handle_asgi_request(wsgi_req, app):
     scope = asgi_scope_http(wsgi_req)
     gc = greenlet.getcurrent()
 
+    channel_tx, channel_rx = trio.open_memory_channel(0)
+
+    async def send_task():
+        async for event in channel_rx:
+            gc.switch(event)
+
     async def send(event):
-        gc.switch(event)
+        # gc.switch(event)
+        await channel_tx.send(event)
 
     if scope["type"] == "websocket":
 
@@ -513,7 +585,7 @@ def handle_asgi_request(wsgi_req, app):
                     msg = websocket_recv_nb(wsgi_req)
                 except IOError:
                     closed = True
-                    gc.switch({"type": "websocket.close"})
+                    await channel_tx.send({"type": "websocket.close"})
                     yield {
                         "type": "websocket.disconnect",
                         "code": 1000,
@@ -553,7 +625,7 @@ def handle_asgi_request(wsgi_req, app):
                     < 0
                 ):
                     closed = True
-                    gc.switch({"type": "websocket.close"})
+                    await channel_tx.send({"type": "websocket.close"})
                     raise IOError("unable to send websocket handshake")
 
             elif event["type"] == "websocket.send":
@@ -567,7 +639,7 @@ def handle_asgi_request(wsgi_req, app):
                         < 0
                     ):
                         closed = True
-                        gc.switch({"type": "websocket.close"})
+                        await channel_tx.send({"type": "websocket.close"})
                         raise IOError("unable to send websocket message")
                 except KeyError:
                     msg = event["text"].encode("utf-8")
@@ -578,13 +650,13 @@ def handle_asgi_request(wsgi_req, app):
                         < 0
                     ):
                         closed = True
-                        gc.switch({"type": "websocket.close"})
+                        await channel_tx.send({"type": "websocket.close"})
                         raise IOError("unable to send websocket message")
 
             elif event["type"] == "websocket.close":
                 print("asked to close in send")
                 closed = True
-                gc.switch(event)
+                await channel_tx.send(event)
 
     elif scope["type"] == "http":
 
@@ -593,7 +665,13 @@ def handle_asgi_request(wsgi_req, app):
 
     def create_app_task():
         nursery = _nurseries[wsgi_req.async_id]
-        nursery.start_soon(app, scope, receive, send)
+
+        def start_app():
+            return app(scope, receive, send)
+
+        nursery.start_soon(race, send_task, start_app)
+
+        # nursery.start_soon(send_task)
 
     _trio_token.run_sync_soon(create_app_task)
 

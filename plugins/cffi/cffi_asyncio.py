@@ -8,6 +8,7 @@ import asyncio
 import inspect
 import greenlet
 
+from cffi_asgi import asgi_scope_http, asgi_start_response
 from _uwsgi import ffi, lib, _applications
 
 uwsgi = lib.uwsgi
@@ -61,7 +62,7 @@ def free_req_queue(wsgi_req):
     """
     lib.uwsgi.async_queue_unused_ptr = lib.uwsgi.async_queue_unused_ptr + 1
     lib.uwsgi.async_queue_unused[lib.uwsgi.async_queue_unused_ptr] = wsgi_req
-    print("free_req_queue", lib.uwsgi.async_queue_unused_ptr, wsgi_req)
+    # print("free_req_queue", lib.uwsgi.async_queue_unused_ptr, wsgi_req)
 
 
 @ffi.def_extern()
@@ -401,68 +402,6 @@ class WSGIinput(object):
         return chunk
 
 
-def asgi_start_response(wsgi_req, status, headers):
-    print(wsgi_req, status, headers)
-
-    status = b"%d" % status
-    lib.uwsgi_response_prepare_headers(wsgi_req, ffi.new("char[]", status), len(status))
-    for (header, value) in headers:
-        lib.uwsgi_response_add_header(
-            wsgi_req,
-            ffi.new("char[]", header),
-            len(header),
-            ffi.new("char[]", value),
-            len(value),
-        )
-
-
-def asgi_scope_http(wsgi_req):
-    """
-    Create the ASGI scope for a http or websockets connection.
-    """
-    environ = {}
-    headers = []
-    iov = wsgi_req.hvec
-    for i in range(0, wsgi_req.var_cnt, 2):
-        key, value = (
-            ffi.string(ffi.cast("char*", iov[i].iov_base), iov[i].iov_len),
-            ffi.string(ffi.cast("char*", iov[i + 1].iov_base), iov[i + 1].iov_len),
-        )
-        if key.startswith(b"HTTP_"):
-            headers.append((key[5:].lower(), value))
-        else:
-            environ[key.decode("ascii")] = value
-
-    scope = {
-        "type": "http",
-        "asgi": {"spec_version": "2.1"},
-        "http_version": environ["SERVER_PROTOCOL"][len("HTTP/") :].decode("utf-8"),
-        "method": environ["REQUEST_METHOD"].decode("utf-8"),
-        "scheme": "http",
-        "path": environ["PATH_INFO"].decode("utf-8"),
-        "raw_path": environ["REQUEST_URI"],
-        "query_string": environ["QUERY_STRING"],
-        "root_path": environ["SCRIPT_NAME"].decode("utf-8"),
-        "headers": headers,
-        # some references to REMOTE_PORT but not always in environ
-        "client": (environ["REMOTE_ADDR"].decode("utf-8"), 0),
-        "server": (environ["SERVER_NAME"].decode("utf-8"), environ["SERVER_PORT"]),
-        "environ": environ,
-    }
-
-    if environ.get("HTTPS") in (b"on",):
-        scope["scheme"] = "https"
-
-    if wsgi_req.http_sec_websocket_key != ffi.NULL:
-        scope["type"] = "websocket"
-        if scope["scheme"] == "https":
-            scope["scheme"] = "wss"
-        else:
-            scope["scheme"] = "ws"
-
-    return scope
-
-
 def websocket_recv_nb(wsgi_req):
     """
     uwsgi.websocket_recv_nb()
@@ -478,10 +417,16 @@ def websocket_recv_nb(wsgi_req):
 def handle_asgi_request(wsgi_req, app):
     scope = asgi_scope_http(wsgi_req)
     loop = asyncio.get_event_loop()
+    channel = asyncio.Queue(1)
     gc = greenlet.getcurrent()
 
     async def send(event):
-        gc.switch(event)
+        await channel.put(event)
+
+    async def send_task():
+        while True:
+            event = await channel.get()
+            gc.switch(event)
 
     if scope["type"] == "websocket":
         ws_event = asyncio.Event()
@@ -530,7 +475,7 @@ def handle_asgi_request(wsgi_req, app):
 
         async def send(event):
             nonlocal closed
-            print("ws send", event["type"], event.get("text", "")[:32])
+            # print("ws send", event["type"], event.get("text", "")[:32])
             if closed:
                 print("ignore send on closed ws")
                 ws_event.set()  # propagate disconnect to rx
@@ -580,6 +525,7 @@ def handle_asgi_request(wsgi_req, app):
         async def receive():
             return {"type": "http.request"}
 
+    send_task = loop.create_task(send_task())
     app_task = loop.create_task(app(scope, receive, send))
 
     while True:
@@ -589,11 +535,8 @@ def handle_asgi_request(wsgi_req, app):
             asgi_start_response(wsgi_req, event["status"], event["headers"])
         elif event["type"] == "http.response.body":
             data = event["body"]
-            print(
-                "write_body_do",
-                lib.uwsgi_response_write_body_do(
-                    wsgi_req, ffi.new("char[]", data), len(data)
-                ),
+            lib.uwsgi_response_write_body_do(
+                wsgi_req, ffi.new("char[]", data), len(data)
             )
             if not event.get("more_body"):
                 break
@@ -603,6 +546,8 @@ def handle_asgi_request(wsgi_req, app):
             break
         else:
             print("loop event", event)
+
+    send_task.cancel()
 
     return lib.UWSGI_OK
 
