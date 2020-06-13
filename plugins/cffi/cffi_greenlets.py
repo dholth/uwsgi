@@ -71,6 +71,7 @@ uwsgi_pypy_greenlets = {}
 
 
 def uwsgi_pypy_greenlet_wrapper():
+    # async_schedule_to_req_green() calls the plugin's request() method in a loop
     lib.async_schedule_to_req_green()
 
 
