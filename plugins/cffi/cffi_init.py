@@ -170,9 +170,9 @@ def uwsgi_cffi_request(wsgi_req):
     """
 
     if wsgi_req.async_force_again:
-        print("force again")
         wsgi_req.async_force_again = 0
         # just close it
+        # it would be possible to continue with the response iterator here
         return lib.UWSGI_OK
 
     def writer(data):
@@ -317,25 +317,34 @@ def iscoroutine(app):
 
 
 def init_app(app, mountpoint):
-    # based on pyloader.c's init_uwsgi_app(int loader, void *arg1, struct wsgi_request *wsgi_req, PyThreadState *interpreter, int app_type)
+
+    id = uwsgi_apps_cnt()
+
+    if id >= lib.uwsgi.max_apps:
+        lib.uwsgi_log(b"ERROR: you cannot load more than %d apps in a worker\n" % uwsgi.max_apps)
+        return -1
+
+    if len(mountpoint) > 0xff - 1:
+        # original uses prefix for very long mountpoints
+        lib.uwsgi_log(b"ERROR: mountpoint must be shorter than %d bytes\n" % 0xff - 1)
+
+    if lib.uwsgi_get_app_id(ffi.NULL, mountpoint, len(mountpoint), -1) != -1:
+        lib.uwsgi_log(b"mountpoint %s already configured. skip.\n" % mountpoint)
+        return -1
 
     now = lib.uwsgi_now()
 
-    id = uwsgi_apps_cnt()
     if lib.uwsgi.default_app == -1 and not lib.uwsgi.no_default_app:
         lib.uwsgi.default_app = id
-
-    # uwsgi_get_app_id(ffi.NULL, mountpoint, len(mountpoint), -1)
-    # "already configured"
 
     wi = uwsgi_apps()[id]  # zero out wi?
 
     wi.modifier1 = lib.cffi_plugin.modifier1
-    wi.mountpoint_len = len(mountpoint)  # TODO clamp to 0xff-1
+    wi.mountpoint_len = len(mountpoint)
     ffi.memmove(wi.mountpoint, mountpoint, len(mountpoint))
 
     # original does dynamic chdir
-    # cffi always in "single interpreter" mode
+    # cffi is always in "single interpreter" mode
     application = app.decode("utf-8")
 
     if application.endswith((".wsgi", ".py")):
@@ -346,17 +355,18 @@ def init_app(app, mountpoint):
         wsgi_apps[id] = uwsgi_pypy_loader(application)
 
     # callable has to be not NULL for uwsgi_get_app_id:
+    app_type = 'WSGI'
     wi.callable = ffi.cast("void *", 1)
     if iscoroutine(wsgi_apps[id]):
-        print(f"{application} is ASGI")
+        app_type = 'ASGI'
         wi.callable = ffi.cast("void *", 2)
     wi.started_at = now
     wi.startup_time = lib.uwsgi_now() - now
 
     lib.uwsgi_log(
         (
-            "WSGI app %d (mountpoint='%s') ready in %d seconds\n"
-            % (id, mountpoint.decode("utf-8"), wi.startup_time)
+            "%s app %d (mountpoint='%s') ready in %d seconds\n"
+            % (app_type, id, mountpoint.decode("utf-8"), wi.startup_time)
         ).encode("utf-8")
     )
 
