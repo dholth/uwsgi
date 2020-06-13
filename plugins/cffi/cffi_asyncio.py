@@ -167,7 +167,7 @@ def uwsgi_asyncio_request(wsgi_req, timed_out):
                 uwsgi.async_proto_fd_table[wsgi_req.fd] = ffi.NULL
                 uwsgi.schedule_to_req()
                 # goto again
-                print("again b", request_id())
+                # print("again b", request_id())
                 return None
 
     except IOError:
