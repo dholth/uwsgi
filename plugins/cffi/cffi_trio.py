@@ -29,37 +29,11 @@ def request_id():
 # keep alive
 _TRIO = ffi.new("char[]", "trio".encode("utf-8"))
 
-timeout_handles = {}  # or array with # of cores?
-
-ob_timeout_counter = 0
-
-
-def store_ob_timeout(wsgi_req, ob_timeout):
-    global ob_timeout_counter
-    # TODO check if wsgi_req.async_id is consistent enough for us
-    ob_timeout_counter += 1
-    wsgi_req.async_timeout = ffi.cast("struct uwsgi_rb_timer *", ob_timeout_counter)
-    timeout_handles[ob_timeout_counter] = ob_timeout
-
-
-def get_ob_timeout(wsgi_req):
-    ob_timeout_ = ffi.cast("ssize_t", wsgi_req.async_timeout)
-    wsgi_req.async_timeout = ffi.NULL
-    return timeout_handles.pop(ob_timeout_)
-
 
 def print_exc():
     import traceback
 
     traceback.print_exc()
-
-
-def setup_trio(threads):
-    setattr(uwsgi, "async", threads)  # keyword
-    if uwsgi.socket_timeout < 30:
-        uwsgi.socket_timeout = 30
-
-    uwsgi.loop = _TRIO
 
 
 def free_req_queue(wsgi_req):
@@ -69,7 +43,6 @@ def free_req_queue(wsgi_req):
     """
     lib.uwsgi.async_queue_unused_ptr = lib.uwsgi.async_queue_unused_ptr + 1
     lib.uwsgi.async_queue_unused[lib.uwsgi.async_queue_unused_ptr] = wsgi_req
-    print("free_req_queue", lib.uwsgi.async_queue_unused_ptr, wsgi_req)
 
 
 @ffi.def_extern()
@@ -179,16 +152,13 @@ def uwsgi_trio_request(wsgi_req, timed_out) -> int:
         print_exc()
 
     except:
-        print("other exception")
         print_exc()
 
     # end
     r_id = request_id()
-    print("normal request end {", r_id)
     uwsgi.async_proto_fd_table[wsgi_req.fd] = ffi.NULL
     lib.uwsgi_close_request(uwsgi.wsgi_req)
     free_req_queue(wsgi_req)
-    print("} normal request end", r_id)
 
     return status
 
@@ -342,17 +312,13 @@ def asyncio_loop():  # name defined in cffi C header
 
     # call uwsgi_cffi_setup_greenlets() first:
     if not uwsgi.schedule_to_req:
-        print("set schedule_to_req")
         uwsgi.schedule_to_req = lib.async_schedule_to_req
     else:
-        print("set schedule_fix")
         uwsgi.schedule_fix = lib.uwsgi_asyncio_schedule_fix
 
     sockets = []
     uwsgi_sock = uwsgi.sockets
     while uwsgi_sock != ffi.NULL:
-        sockname = ffi.string(uwsgi_sock.name, uwsgi_sock.name_len).decode("utf-8")
-        print(f"sock {sockname} fd {uwsgi_sock.fd}")
         sockets.append(uwsgi_sock)
         uwsgi_sock = uwsgi_sock.next
 
@@ -456,8 +422,6 @@ class WSGIinput(object):
 
 
 def asgi_start_response(wsgi_req, status, headers):
-    print(wsgi_req, status, headers)
-
     status = b"%d" % status
     lib.uwsgi_response_prepare_headers(wsgi_req, ffi.new("char[]", status), len(status))
     for (header, value) in headers:
@@ -572,8 +536,6 @@ def handle_asgi_request(wsgi_req, app):
                 else:
                     print("no msg", wsgi_req.websocket_opcode)
                     await trio.lowlevel.wait_readable(wsgi_req.fd)
-            # send this if connection is closed:
-            # { "type": "websocket.disconnect", "code": int }
 
         receive = receiver().__anext__
 
@@ -642,11 +604,8 @@ def handle_asgi_request(wsgi_req, app):
             asgi_start_response(wsgi_req, event["status"], event["headers"])
         elif event["type"] == "http.response.body":
             data = event["body"]
-            print(
-                "write_body_do",
-                lib.uwsgi_response_write_body_do(
-                    wsgi_req, ffi.new("char[]", data), len(data)
-                ),
+            lib.uwsgi_response_write_body_do(
+                wsgi_req, ffi.new("char[]", data), len(data)
             )
             if not event.get("more_body"):
                 break
@@ -662,6 +621,8 @@ def to_network(native):
     return native.encode("latin1")
 
 
+# Instead of using a C function pointer to call our Python function,
+# we store 1 for WSGI or 2 for ASGI.
 ASGI_CALLABLE = ffi.cast("void *", 2)
 
 
@@ -802,6 +763,14 @@ def _uwsgi_cffi_request(wsgi_req):
                 response.close()
 
     return lib.UWSGI_OK
+
+
+def setup_trio(threads):
+    setattr(uwsgi, "async", threads)  # keyword
+    if uwsgi.socket_timeout < 30:
+        uwsgi.socket_timeout = 30
+
+    uwsgi.loop = _TRIO
 
 
 def trio_init():

@@ -251,7 +251,7 @@ def uwsgi_cffi_request(wsgi_req):
     try:
         response = app(environ, start_response)
     except:
-        print("app exception")
+        print_exc()
         wsgi_req.async_force_again = 1
         return lib.UWSGI_AGAIN
 
@@ -430,6 +430,3 @@ def uwsgi_file_loader(path):
     c = "application"
     mod = imp.load_source("uwsgi_file_wsgi", path)
     return getattr(mod, c)
-
-
-sys.modules["wsgi_apps"] = wsgi_apps

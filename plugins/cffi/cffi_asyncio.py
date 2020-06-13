@@ -29,23 +29,15 @@ def request_id():
 # keep alive
 _ASYNCIO = ffi.new("char[]", "asyncio".encode("utf-8"))
 
-timeout_handles = {}  # or array with # of cores?
-
-ob_timeout_counter = 0
+timeout_handles = {}
 
 
 def store_ob_timeout(wsgi_req, ob_timeout):
-    global ob_timeout_counter
-    # TODO check if wsgi_req.async_id is consistent enough for us
-    ob_timeout_counter += 1
-    wsgi_req.async_timeout = ffi.cast("struct uwsgi_rb_timer *", ob_timeout_counter)
-    timeout_handles[ob_timeout_counter] = ob_timeout
+    timeout_handles[wsgi_req.async_id] = ob_timeout
 
 
 def get_ob_timeout(wsgi_req):
-    ob_timeout_ = ffi.cast("ssize_t", wsgi_req.async_timeout)
-    wsgi_req.async_timeout = ffi.NULL
-    return timeout_handles.pop(ob_timeout_)
+    return timeout_handles.pop(wsgi_req.async_id)
 
 
 def print_exc():
@@ -186,12 +178,9 @@ def uwsgi_asyncio_request(wsgi_req, timed_out):
         print_exc()
 
     # end
-    r_id = request_id()
-    print("normal request end {", r_id)
     uwsgi.async_proto_fd_table[wsgi_req.fd] = ffi.NULL
     lib.uwsgi_close_request(uwsgi.wsgi_req)
     free_req_queue(wsgi_req)
-    print("} normal request end", r_id)
 
 
 def uwsgi_asyncio_accept(uwsgi_sock):
@@ -199,7 +188,6 @@ def uwsgi_asyncio_accept(uwsgi_sock):
     wsgi_req = find_first_available_wsgi_req()
     if wsgi_req == ffi.NULL:
         lib.uwsgi_async_queue_is_full(lib.uwsgi_now())
-        print("queue is full")
         return None
 
     uwsgi.wsgi_req = wsgi_req
@@ -209,7 +197,6 @@ def uwsgi_asyncio_accept(uwsgi_sock):
     if lib.wsgi_req_simple_accept(wsgi_req, uwsgi_sock.fd):
         uwsgi.workers[uwsgi.mywid].cores[wsgi_req.async_id].in_request = 0
         free_req_queue(wsgi_req)
-        print("no accept")
         return None
 
     wsgi_req.start_of_request = lib.uwsgi_micros()
@@ -232,7 +219,6 @@ def uwsgi_asyncio_accept(uwsgi_sock):
         store_ob_timeout(wsgi_req, ob_timeout)
 
     except:
-        print("loop exception")
         loop.remove_reader(wsgi_req.fd)
         free_req_queue(wsgi_req)
         print_exc()
@@ -241,30 +227,24 @@ def uwsgi_asyncio_accept(uwsgi_sock):
 
 def uwsgi_asyncio_hook_fd(wsgi_req):
     uwsgi = lib.uwsgi
-    print("hook fd", wsgi_req.fd)
     uwsgi.wsgi_req = wsgi_req
     uwsgi.schedule_to_req()
 
 
 def uwsgi_asyncio_hook_timeout(wsgi_req):
     uwsgi = lib.uwsgi
-    print("timeout hook", wsgi_req.fd)
     uwssgi.wsgi_req = wsgi_req
     uwsgi.wsgi_req.async_timed_out = 1
     uwsgi.schedule_to_req()
 
 
 def uwsgi_asyncio_hook_fix(wsgi_req):
-    print("fix hook", wsgi_req.fd)
     uwsgi.wsgi_req = wsgi_req
     uwsgi.schedule_to_req()
 
 
 @ffi.def_extern()
 def uwsgi_asyncio_schedule_fix(wsgi_req):
-    if wsgi_req:
-        print("fix schedule", wsgi_req.fd)
-    print("schedule_fix")
     loop = get_loop()
     loop.call_soon(uwsgi_asyncio_hook_fix, wsgi_req)
 
@@ -312,17 +292,13 @@ def asyncio_loop():
 
     # call uwsgi_cffi_setup_greenlets() first:
     if not uwsgi.schedule_to_req:
-        print("set schedule_to_req")
         uwsgi.schedule_to_req = lib.async_schedule_to_req
     else:
-        print("set schedule_fix")
         uwsgi.schedule_fix = lib.uwsgi_asyncio_schedule_fix
 
     loop = get_loop()
     uwsgi_sock = uwsgi.sockets
     while uwsgi_sock != ffi.NULL:
-        sockname = ffi.string(uwsgi_sock.name, uwsgi_sock.name_len).decode("utf-8")
-        print(f"sock {sockname} fd {uwsgi_sock.fd}")
         loop.add_reader(uwsgi_sock.fd, uwsgi_asyncio_accept, uwsgi_sock)
         uwsgi_sock = uwsgi_sock.next
 
@@ -479,6 +455,10 @@ def asgi_scope_http(wsgi_req):
 
     if wsgi_req.http_sec_websocket_key != ffi.NULL:
         scope["type"] = "websocket"
+        if scope["scheme"] == "https":
+            scope["scheme"] = "wss"
+        else:
+            scope["scheme"] = "ws"
 
     return scope
 
@@ -493,80 +473,6 @@ def websocket_recv_nb(wsgi_req):
     ret = ffi.buffer(ub.buf, ub.pos)[:]
     lib.uwsgi_buffer_destroy(ub)
     return ret
-
-
-# async def sender(wsgi_req):
-#     """
-#     Alternative async generator state management.
-
-#     Not working.
-#     """
-#     loop = asyncio.get_event_loop()
-#     event = yield
-#     print("got an event", event)
-#     if event["type"] == "websocket.accept":
-#         if (
-#             lib.uwsgi_websocket_handshake(
-#                 wsgi_req, ffi.NULL, 0, ffi.NULL, 0, ffi.NULL, 0
-#             )
-#             < 0
-#         ):
-#             raise IOError("unable to send websocket handshake")
-
-#     elif event["type"] == "websocket.close":
-#         # TODO send a 403
-#         gc.switch(event)
-#         return  # or accept further sends() without complaining
-
-#     else:
-#         raise ValueError("Unexpected event", event["type"])
-
-#     while True:
-#         event = yield
-
-#         if event["type"] == "websocket.send":
-#             # ok to call during any part of app?
-#             if "bytes" in event:
-#                 msg = event["bytes"]
-#                 if (
-#                     lib.uwsgi_websocket_send_binary(
-#                         wsgi_req, ffi.new("char[]", msg), len(msg)
-#                     )
-#                     < 0
-#                 ):
-#                     raise IOError("unable to send websocket message")
-#             elif "text" in event:
-#                 msg = event["text"].encode("utf-8")
-#                 if (
-#                     lib.uwsgi_websocket_send(wsgi_req, ffi.new("char[]", msg), len(msg))
-#                     < 0
-#                 ):
-#                     raise IOError("unable to send websocket message")
-#             # bad event?
-
-#         elif event["type"] == "websocket.close":
-#             gc.switch(event)
-#             break
-
-#         else:
-#             raise ValueError("Unexpected event", event["type"])
-
-
-# try:
-
-#     async def prime():
-#         _sender = sender(wsgi_req)
-#         print("made sender")
-#         print("priming sender")
-#         await _sender.__anext__()  # has to be called once before send()
-#         loop.create_task(app(scope, receive, _sender.asend))
-
-#     print("creating task")
-#     loop.create_task(prime())
-#     print("created task")
-# except:
-#     import traceback
-#     traceback.print_exc()
 
 
 def handle_asgi_request(wsgi_req, app):
@@ -624,7 +530,7 @@ def handle_asgi_request(wsgi_req, app):
 
         async def send(event):
             nonlocal closed
-            print("ws send", event)
+            print("ws send", event["type"], event.get("text", "")[:32])
             if closed:
                 print("ignore send on closed ws")
                 ws_event.set()  # propagate disconnect to rx
@@ -759,7 +665,6 @@ def _uwsgi_cffi_request(wsgi_req):
     # }
 
     if wsgi_req.async_force_again:
-        print("force again")
         wsgi_req.async_force_again = 0
         # just close it
         try:

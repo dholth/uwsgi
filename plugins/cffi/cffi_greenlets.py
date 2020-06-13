@@ -84,15 +84,6 @@ def uwsgi_pypy_greenlet_current_wsgi_req():
     return ffi.NULL
 
 
-def not_cffi(modifier1):
-    """
-    Is the request related to our plugin?
-
-    Used in some versions of the uwsgi loop. Not sure why.
-    """
-    return ffi.string(lib.uwsgi.p[modifier1].name) != b"cffi"
-
-
 @ffi.def_extern()
 def uwsgi_pypy_greenlet_schedule_to_req():
     id = lib.uwsgi.wsgi_req.async_id
@@ -105,14 +96,14 @@ def uwsgi_pypy_greenlet_schedule_to_req():
         lib.uwsgi.wsgi_req.suspended = 1
 
     # this is called in the main stack
-    if not_cffi(modifier1) and lib.uwsgi.p[modifier1].suspend:
+    if lib.uwsgi.p[modifier1].suspend:
         lib.uwsgi.p[modifier1].suspend(ffi.NULL)
 
     # let's switch
     uwsgi_pypy_greenlets[id].switch()
 
     # back to the main stack
-    if not_cffi(modifier1) and lib.uwsgi.p[modifier1].resume:
+    if lib.uwsgi.p[modifier1].resume:
         lib.uwsgi.p[modifier1].resume(ffi.NULL)
 
 
@@ -122,13 +113,14 @@ def uwsgi_pypy_greenlet_schedule_to_main(wsgi_req):
     modifier1 = wsgi_req.uh.modifier1
 
     # this is called in the current greenlet
-    if not_cffi(modifier1) and lib.uwsgi.p[modifier1].suspend:
+    # our cffi plugin doesn't define suspend / resume
+    if lib.uwsgi.p[modifier1].suspend:
         lib.uwsgi.p[modifier1].suspend(wsgi_req)
 
     uwsgi_pypy_main_greenlet.switch()
 
     # back to the greenlet
-    if not_cffi(modifier1) and lib.uwsgi.p[modifier1].resume:
+    if lib.uwsgi.p[modifier1].resume:
         lib.uwsgi.p[modifier1].resume(wsgi_req)
 
     # update current running greenlet
