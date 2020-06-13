@@ -300,7 +300,7 @@ def execfile(path):
 
 def eval_exec(to_eval, to_exec):
     for usl in uwsgi_foreach(to_eval):
-        code = compile(ffi.string(usl.value), "<eval>", "eval")
+        code = compile(ffi.string(usl.value), "<eval>", "exec")
         exec(code, globals(), {})
 
     for usl in uwsgi_foreach(to_exec):
