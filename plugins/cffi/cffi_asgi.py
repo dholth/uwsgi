@@ -31,7 +31,8 @@ def asgi_scope_http(wsgi_req):
             ffi.string(ffi.cast("char*", iov[i + 1].iov_base), iov[i + 1].iov_len),
         )
         if key.startswith(b"HTTP_"):
-            headers.append((key[5:].lower(), value))
+            # replace cgi-style _ with http-style -
+            headers.append((key[5:].lower().replace(b'_', b'-'), value))
         else:
             environ[key.decode("ascii")] = value
 
