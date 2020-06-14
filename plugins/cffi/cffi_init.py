@@ -445,11 +445,11 @@ def uwsgi_cffi_mule(opt):
     From the docs:
     As mentioned before, mules can be programmed.
     To give custom logic to a mule, give the mule
-    option a path to a script (it must end in “.py”)
-    or a “package.module:callable” value.
+    option a path to a script (it must end in ".py")
+    or a "package.module:callable" value.
     """
     opt = ffi.string(opt).decode("latin1")
-    if opt.endswith('.py')
+    if opt.endswith(".py"):
         execfile(opt)
     else:
         uwsgi_pypy_loader(opt)()
