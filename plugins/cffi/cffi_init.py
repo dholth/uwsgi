@@ -21,7 +21,7 @@ class UwsgiModule(types.ModuleType):
     pass
 
 
-_uwsgi = UwsgiModule("uwsgi")
+_uwsgi = UwsgiModule("_uwsgi")
 _uwsgi.lib = lib
 _uwsgi.ffi = ffi
 _uwsgi._applications = {}
@@ -412,6 +412,9 @@ def init_app(app, mountpoint):
 
 @ffi.def_extern()
 def uwsgi_cffi_mount_app(mountpoint, app):
+    """
+    Handle the versatile --mount <mountpoint>=<app> flag
+    """
     try:
         app_id = init_app(ffi.string(app), ffi.string(mountpoint))
         return app_id
@@ -438,7 +441,18 @@ def uwsgi_cffi_signal_handler(sig, handler):
 
 @ffi.def_extern()
 def uwsgi_cffi_mule(opt):
+    """
+    From the docs:
+    As mentioned before, mules can be programmed.
+    To give custom logic to a mule, give the mule
+    option a path to a script (it must end in “.py”)
+    or a “package.module:callable” value.
+    """
     opt = ffi.string(opt).decode("latin1")
+    if opt.endswith('.py')
+        execfile(opt)
+    else:
+        uwsgi_pypy_loader(opt)()
 
 
 @ffi.def_extern()
