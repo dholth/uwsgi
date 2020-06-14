@@ -561,15 +561,15 @@ def handle_asgi_request(wsgi_req, app):
     scope = asgi_scope_http(wsgi_req)
     gc = greenlet.getcurrent()
 
-    channel_tx, channel_rx = trio.open_memory_channel(0)
+    channel_tx, channel_rx = trio.open_memory_channel(1)
 
     async def send_task():
         async for event in channel_rx:
             gc.switch(event)
 
-    async def send(event):
-        # gc.switch(event)
-        await channel_tx.send(event)
+    async def _send(event):
+        gc.switch(event)
+        # await channel_tx.send(event)
 
     if scope["type"] == "websocket":
 
@@ -625,7 +625,7 @@ def handle_asgi_request(wsgi_req, app):
                     < 0
                 ):
                     closed = True
-                    await channel_tx.send({"type": "websocket.close"})
+                    await _send({"type": "websocket.close"})
                     raise IOError("unable to send websocket handshake")
 
             elif event["type"] == "websocket.send":
@@ -639,7 +639,7 @@ def handle_asgi_request(wsgi_req, app):
                         < 0
                     ):
                         closed = True
-                        await channel_tx.send({"type": "websocket.close"})
+                        await _send({"type": "websocket.close"})
                         raise IOError("unable to send websocket message")
                 except KeyError:
                     msg = event["text"].encode("utf-8")
@@ -650,28 +650,26 @@ def handle_asgi_request(wsgi_req, app):
                         < 0
                     ):
                         closed = True
-                        await channel_tx.send({"type": "websocket.close"})
+                        await _send({"type": "websocket.close"})
                         raise IOError("unable to send websocket message")
 
             elif event["type"] == "websocket.close":
                 print("asked to close in send")
                 closed = True
-                await channel_tx.send(event)
+                await _send(event)
 
     elif scope["type"] == "http":
+        send = _send
 
         async def receive():
             return {"type": "http.request"}
 
+    async def app_starter():
+        await app(scope, receive, send)
+
     def create_app_task():
         nursery = _nurseries[wsgi_req.async_id]
-
-        def start_app():
-            return app(scope, receive, send)
-
-        nursery.start_soon(race, send_task, start_app)
-
-        # nursery.start_soon(send_task)
+        nursery.start_soon(app_starter)
 
     _trio_token.run_sync_soon(create_app_task)
 

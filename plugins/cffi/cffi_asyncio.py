@@ -62,7 +62,6 @@ def free_req_queue(wsgi_req):
     """
     lib.uwsgi.async_queue_unused_ptr = lib.uwsgi.async_queue_unused_ptr + 1
     lib.uwsgi.async_queue_unused[lib.uwsgi.async_queue_unused_ptr] = wsgi_req
-    # print("free_req_queue", lib.uwsgi.async_queue_unused_ptr, wsgi_req)
 
 
 @ffi.def_extern()

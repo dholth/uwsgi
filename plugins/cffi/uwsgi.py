@@ -247,7 +247,7 @@ def install_mule_msg_hook(mule_msg_dispatcher):
 
 
 # plugin callback defined outside cffi_init.py
-@ffi.def_extern
+@ffi.def_extern()
 def uwsgi_cffi_mule_msg(message, len):
     msg = ffi.string(message, len)
     if not mule_msg_extra_hooks:
