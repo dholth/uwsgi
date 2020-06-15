@@ -1,20 +1,29 @@
 """
-cffi embedding API based Python plugin, based on pypy plugin.
+cffi embedding API based Python plugin.
+Should work with both CPython and PyPy 3.
 
-Should work with both CPython and PyPy in theory.
+
+Based on PyPy plugin by Maciej Fijalkowski.
 """
+
+import os
+import sys
+import site
+
+from cffi_plugin import ffi, lib
+
+# set desired virtualenv (may only work on Python 3?)
+if lib.ucffi.home != ffi.NULL:
+    sys.path = [entry for entry in sys.path if not "site-packages" in entry]
+    sys.executable = os.path.join(
+        ffi.string(lib.ucffi.home).decode("utf-8"), "bin", "python"
+    )
+    site.main()
 
 import imp
 import importlib
-import sys
-import os
 import inspect
 import types
-
-import cffi_plugin
-
-from cffi_plugin import ffi, lib
-from cffi_plugin.lib import *
 
 
 class UwsgiModule(types.ModuleType):

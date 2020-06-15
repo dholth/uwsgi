@@ -5,7 +5,7 @@ import sys
 from distutils import sysconfig
 import subprocess
 
-subprocess.check_call(["make"], cwd="plugins/cffi")
+subprocess.check_call(["make", "PYTHON=%s" % sys.executable], cwd="plugins/cffi")
 
 
 def get_python_version():
