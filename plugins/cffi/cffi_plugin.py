@@ -13,6 +13,7 @@ plugin_data = """
 static struct uwsgi_cffi {
 	char *wsgi;
     char *init;
+    char *home;
 
     struct uwsgi_string_list *eval;
 	struct uwsgi_string_list *eval_post_fork;
@@ -90,6 +91,7 @@ extern void uwsgi_cffi_more_apps() {
 }
 
 static struct uwsgi_option uwsgi_cffi_options[] = {
+    {"cffi-home", required_argument, 0, "set PYTHONHOME/virtualenv", uwsgi_opt_set_str, &ucffi.home, 0},
     {"cffi-wsgi", required_argument, 0, "load a WSGI module (or use --mount instead)", uwsgi_opt_set_str, &ucffi.wsgi, 0},
     {"cffi-init", required_argument, 0, "load a module during init", uwsgi_opt_set_str, &ucffi.init, 0},
     {"cffi-eval", required_argument, 0, "evaluate Python code before fork()", uwsgi_opt_add_string_list, &ucffi.eval, 0},

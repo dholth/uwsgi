@@ -9,7 +9,7 @@ import re, sys
 comment = re.compile(r'^# (?P<lineno>\d+) "(?P<filename>[^\"]+)"')
 
 # include stdint.h also?
-allowed_filenames = re.compile(".*(<stdin>)$")
+allowed_filenames = re.compile(r".*(<stdin>|uwsgi\.h)$")
 
 
 def filter_by_file(input):
