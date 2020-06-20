@@ -20,6 +20,7 @@ def get_python_version():
 GCC_LIST = ["cffi_plugin"]
 
 if sys.implementation.name == "pypy":
+    # Link to the base libpypy3-c.so, not the copy in a virtualenv:
 
     CFLAGS = [
         "-pthread",
@@ -30,16 +31,20 @@ if sys.implementation.name == "pypy":
     ]
 
     if sys.platform == "linux":
-        LDFLAGS = [f"-L{sys.prefix}/bin/", f"-Wl,-rpath={sys.prefix}/bin/", "-lpypy3-c"]
+        LDFLAGS = [
+            f"-L{sys.base_exec_prefix}/bin/",
+            f"-Wl,-rpath={sys.base_exec_prefix}/bin/",
+            "-lpypy3-c",
+        ]
     else:
-        LDFLAGS = [f"-L{sys.prefix}/bin/", "-lpypy3-c"]
+        LDFLAGS = [f"-L{sys.base_exec_prefix}/bin/", "-lpypy3-c"]
     LIBS = []
 
     def post_build(config):
         # How to detect embedded or shared object?
         # find pypy3-c on osx
         if sys.platform == "darwin":
-            rpath = os.path.dirname(sys.executable)
+            rpath = os.path.join(sys.base_exec_prefix, "bin")
             subprocess.check_call(
                 ["install_name_tool", "-add_rpath", rpath, "cffi_plugin.so"]
             )
