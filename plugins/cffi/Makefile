@@ -7,7 +7,7 @@ _constants.h: ../../uwsgi.h constants.py
 	$(PYTHON) constants.py
 
 _uwsgi_preprocessed.h: ../../uwsgi.h
-	echo '#include "uwsgi.h"' | gcc -E - -I ../../ -D "__attribute__(x)"= > _uwsgi_preprocessed.h
+	cat ../../uwsgi.h | gcc -E - -I ../../ -D "__attribute__(x)"= > _uwsgi_preprocessed.h
 
 _uwsgi.h: _uwsgi_preprocessed.h filtercdefs.py
 	 $(PYTHON) filtercdefs.py _uwsgi_preprocessed.h > _uwsgi.h
