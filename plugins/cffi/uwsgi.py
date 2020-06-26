@@ -92,7 +92,7 @@ def register_rpc(name, func, argc=0):
     uwsgi_gc.append(cb)
     if (
         lib.uwsgi_register_rpc(
-            ffi.new("char[]", name), ffi.addressof(lib.cffi_plugin), argc, cb,
+            ffi.new("char[]", name), ffi.addressof(lib.cffi_plugin), argc, cb
         )
         < 0
     ):
@@ -306,6 +306,20 @@ def workers():
         worker["signals"] = lib.uwsgi.workers[i].signals
         worker["exceptions"] = lib.uwsgi_worker_exceptions(i)
         worker["apps"] = []
+        apps_cnt = lib.uwsgi.workers[i].apps_cnt
+        apps = lib.uwsgi.workers[i].apps
+        for j in range(0, apps_cnt):
+            app = apps[j]
+            worker["apps"].append(
+                {
+                    "id": j,
+                    "mountpoint": ffi.string(app.mountpoint, app.mountpoint_len).decode(
+                        "utf-8"
+                    ),
+                    "startup_time": app.startup_time,
+                    "requests": app.requests,
+                }
+            )
         if lib.uwsgi.workers[i].cheaped:
             worker["status"] == "cheap"
         elif lib.uwsgi.workers[i].suspended and not lib.uwsgi_worker_is_busy(i):
