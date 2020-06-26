@@ -486,13 +486,15 @@ def websocket_handshake(key=None, origin=None, proto=None):
     c_key = ffi.NULL
     c_origin = ffi.NULL
     c_proto = ffi.NULL
-    if key != ffi.NULL:
+    if key:
         len_key = len(key)
         c_key = ffi.new("char[]", key.encode("latin1"))  # correct encoding?
-    if origin != ffi.NULL:
+    if origin:
         len_origin = len(origin)
         c_origin = ffi.new("char[]", origin.encode("latin1"))
-    c_proto = ffi.new("char[]", proto.encode("latin1"))
+    if proto:
+        len_proto = len(proto)
+        c_proto = ffi.new("char[]", proto.encode("latin1"))
     if (
         lib.uwsgi_websocket_handshake(
             wsgi_req, c_key, len_key, c_origin, len_origin, c_proto, len_proto
