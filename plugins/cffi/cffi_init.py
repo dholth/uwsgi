@@ -224,6 +224,9 @@ def uwsgi_cffi_request(wsgi_req):
     # app_mount can be something while app_id is -1
     if wsgi_req.appid != ffi.NULL:
         app_mount = ffi.string(wsgi_req.appid).decode("utf-8")
+    # uwsgi app struct
+    wi = lib.uwsgi.workers[lib.uwsgi.mywid].apps[app_id]
+    wi.requests += 1  # we might wind up here more often than expected
     app = wsgi_apps.get(app_id)
 
     # (see python wsgi_handlers.c)
