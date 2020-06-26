@@ -216,12 +216,6 @@ def uwsgi_asyncio_wait_write_hook(fd, timeout):
         loop.remove_writer(fd)
 
 
-def find_first_available_wsgi_req():
-    uwsgi = lib.uwsgi
-    wsgi_req = lib.find_first_available_wsgi_req()
-    return wsgi_req
-
-
 def uwsgi_trio_request(wsgi_req, timed_out) -> int:
     """
     Handle a request at the event-loop level.
@@ -273,7 +267,7 @@ _nurseries = {}
 def uwsgi_trio_accept(uwsgi_sock, nursery):
 
     uwsgi = lib.uwsgi
-    wsgi_req = find_first_available_wsgi_req()
+    wsgi_req = lib.find_first_available_wsgi_req()
     if wsgi_req == ffi.NULL:
         lib.uwsgi_async_queue_is_full(lib.uwsgi_now())
         return None
@@ -630,28 +624,16 @@ def handle_asgi_request(wsgi_req, app):
 
             elif event["type"] == "websocket.send":
                 # ok to call during any part of app?
-                try:
+                if "bytes" in msg:
                     msg = event["bytes"]
-                    if (
-                        lib.uwsgi_websocket_send_binary(
-                            wsgi_req, ffi.new("char[]", msg), len(msg)
-                        )
-                        < 0
-                    ):
-                        closed = True
-                        await _send({"type": "websocket.close"})
-                        raise IOError("unable to send websocket message")
-                except KeyError:
+                    websocket_send = lib.uwsgi_websocket_send_binary
+                else:
                     msg = event["text"].encode("utf-8")
-                    if (
-                        lib.uwsgi_websocket_send(
-                            wsgi_req, ffi.new("char[]", msg), len(msg)
-                        )
-                        < 0
-                    ):
-                        closed = True
-                        await _send({"type": "websocket.close"})
-                        raise IOError("unable to send websocket message")
+                    websocket_send = lib.uwsgi
+                if websocket_send(wsgi_req, ffi.new("char[]", msg), len(msg)) < 0:
+                    closed = True
+                    await send_({"type": "websocket.close"})
+                    raise IOError("unable to send websocket message")
 
             elif event["type"] == "websocket.close":
                 print("asked to close in send")
