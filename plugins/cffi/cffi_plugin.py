@@ -1,6 +1,8 @@
 # based on the example and pypy plugins
 
 import cffi
+import build_bundle
+import io
 
 ffibuilder = cffi.FFI()
 
@@ -75,7 +77,9 @@ static int uwsgi_cffi_mount_app(char *, char *);
 """
 ffibuilder.embedding_api(exposed_to_uwsgi)
 
-ffibuilder.embedding_init_code(open("cffi_init.py", "r").read())
+init_code = io.StringIO()
+build_bundle.bundler(init_code)
+ffibuilder.embedding_init_code(init_code.getvalue())
 
 ffibuilder.set_source(
     "cffi_plugin",
