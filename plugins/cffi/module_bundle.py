@@ -46,7 +46,6 @@ for module_name in MODULES:
     spec = importlib.util.spec_from_loader(module_name, loader, origin=module_name)
     # spec.has_location = True
     module = importlib.util.module_from_spec(spec)
-    print(module, spec, module.__file__, module.__spec__, module.__loader__)
     if module_name != "_init":
         sys.modules[module_name] = module
     spec.loader.exec_module(module)
