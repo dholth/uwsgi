@@ -7,9 +7,10 @@ python ./uwsgiconfig.py -p plugins/cffi nolang
 authbind --deep ./uwsgi \
   --master \
   --enable-threads \
+  --listen 4096 \
   --plugin=cffi \
   --cffi-init=cffi_setup_trio \
-  --async=32 \
+  --async=64 \
   --http=[::]:80 \
   --http-websockets \
   --manage-script-name \
@@ -18,3 +19,6 @@ authbind --deep ./uwsgi \
   --chdir=$VIRTUAL_ENV/bin \
   --touch-reload $PWD/starlettetest.py \
   --touch-reload $PWD/plugins/cffi/cffi_trio.py
+ 
+
+# --cffi-home=$VIRTUAL_ENV \

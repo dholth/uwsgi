@@ -10,9 +10,12 @@ python uwsgiconfig.py -p plugins/cffi nolang
 ./uwsgi --plugin cffi -T \
     --http-socket 0.0.0.0:8080 \
     --single-interpreter \
+    --async=100 \
+    --cffi-eval "import cffi_greenlets; cffi_greenlets.uwsgi_cffi_setup_greenlets()" \
     --env=PYTHONPATH=$HOME/prog/uwsgi:$HOME/prog/uwsgi/plugins/cffi \
-    --cffi-wsgi=$PWD/examples/welcome.py \
+    --cffi-wsgi=$PWD/tests/websockets_chat_async.py \
     --manage-script-name \
     --mount=/app=$PWD/examples/welcome3.py \
     --chdir=$VIRTUAL_ENV/bin \
-    --master
+    --master \
+    --cffi-eval "import sys; print('executable:', sys.executable)"

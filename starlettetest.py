@@ -6,7 +6,7 @@ from starlette.routing import Route, Mount, WebSocketRoute
 import os
 import asyncio
 import asyncio_redis
-import trio_asyncio
+import sniffio
 
 
 def get_template():
@@ -53,6 +53,9 @@ async def chat_endpoint(websocket: WebSocket):
             print("redis msg", msg)
             if msg:
                 await websocket.send_text(msg.value)
+                if msg.value == "8k":
+                    # maybe switch contexts?
+                    await websocket.send_text("k" * 65536)
 
     loop = asyncio.get_event_loop()
 
@@ -88,11 +91,15 @@ app_to_wrap = Starlette(
 
 
 async def app(scope, receive, send):
-    async with trio_asyncio.open_loop() as loop:
-        # async part of your main program here
-        receive_ = trio_asyncio.trio_as_aio(receive)
-        send_ = trio_asyncio.trio_as_aio(send)
-        await trio_asyncio.aio_as_trio(app_to_wrap)(scope, receive_, send_)
+    if sniffio.current_async_library() == "trio":
+        import trio_asyncio
+        async with trio_asyncio.open_loop() as loop:
+            # async part of your main program here
+            receive_ = trio_asyncio.trio_as_aio(receive)
+            send_ = trio_asyncio.trio_as_aio(send)
+            await trio_asyncio.aio_as_trio(app_to_wrap)(scope, receive_, send_)
+    else:
+        await app_to_wrap(scope, receive, send)
 
 
 import sys
