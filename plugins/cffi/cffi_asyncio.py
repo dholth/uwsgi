@@ -265,7 +265,6 @@ def asyncio_loop():
         uwsgi.async_waiting_fd_table = lib.uwsgi_calloc(
             ffi.sizeof("struct wsgi_request *") * uwsgi.max_fd
         )
-
     if not uwsgi.async_proto_fd_table:
         uwsgi.async_proto_fd_table = lib.uwsgi_calloc(
             ffi.sizeof("struct wsgi_request *") * uwsgi.max_fd
@@ -414,7 +413,7 @@ def handle_asgi_request(wsgi_req, app):
     channel = asyncio.Queue(1)
     gc = greenlet.getcurrent()
 
-    async def _send(event):
+    async def send_(event):
         await channel.put(event)
 
     async def send_task():

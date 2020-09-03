@@ -93,6 +93,7 @@ app_to_wrap = Starlette(
 async def app(scope, receive, send):
     if sniffio.current_async_library() == "trio":
         import trio_asyncio
+
         async with trio_asyncio.open_loop() as loop:
             # async part of your main program here
             receive_ = trio_asyncio.trio_as_aio(receive)

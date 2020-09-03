@@ -57,6 +57,8 @@ def to_network(native):
 def uwsgi_cffi_init():
     global wsgi_apps
 
+    # pypy will find environment from current working directory
+    # (uwsgi --chdir $VIRTUAL_ENV/bin)
     if "PYTHONPATH" in os.environ:
         sys.path[0:0] = os.environ["PYTHONPATH"].split(os.pathsep)
 
