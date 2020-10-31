@@ -1,5 +1,9 @@
 """
 Load Python modules from strings. You know, for tracebacks.
+
+cffi can embed a single module for initialization. This lets us
+have several, and shows good tracebacks with source code printouts
+when there are errors in those modules.
 """
 
 import sys
