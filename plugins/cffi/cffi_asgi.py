@@ -57,7 +57,7 @@ def asgi_scope_http(wsgi_req):
         # some references to REMOTE_PORT but not always in environ
         "client": (environ["REMOTE_ADDR"].decode("utf-8"), REMOTE_PORT),
         "server": (environ["SERVER_NAME"].decode("utf-8"), SERVER_PORT),
-        "environ": environ,
+        "extensions": {"environ": environ},
     }
 
     if environ.get("HTTPS") in (b"on",):

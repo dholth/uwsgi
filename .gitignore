@@ -33,3 +33,5 @@ check/check_*
 .vscode
 /plugins/cffi/_*
 /plugins/cffi/cffi_plugin.c
+
+.uwsgi_plugins_builder

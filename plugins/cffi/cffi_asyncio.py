@@ -502,7 +502,7 @@ def handle_asgi_request(wsgi_req, app):
 
     elif scope["type"] == "http":
 
-        send = _send
+        send = send_
 
         async def receive():
             return {"type": "http.request"}
