@@ -7,7 +7,7 @@ python ./uwsgiconfig.py -p plugins/cffi nolang
 authbind --deep ./uwsgi \
   --master \
   --enable-threads \
-  --listen 4096 \
+  --listen 64 \
   --plugin=cffi \
   --cffi-init=cffi_setup_trio \
   --async=64 \

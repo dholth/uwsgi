@@ -13,7 +13,7 @@
   <div id="app">
     <md-card class="md-layout-item md-size-50 md-small-size-100">
       <md-card-header>
-        <div class="md-title">WebSocket Chat (asgi)</div>
+        <div class="md-title">WebSocket Chat (asgi + $async_library)</div>
       </md-card-header>
 
       <md-card-content>
@@ -35,7 +35,7 @@
   <script src="https://unpkg.com/vue"></script>
   <script src="https://unpkg.com/vue-material"></script>
   <script>
-    var s = new WebSocket("%s://%s/foobar/");
+    var s = new WebSocket("$protocol://$path/foobar/");
 
     function post(message) {
       app.messages.splice(0, 0, message);

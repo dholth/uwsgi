@@ -573,6 +573,8 @@ def handle_asgi_request(wsgi_req, app):
             nonlocal closed
 
             yield {"type": "websocket.connect"}
+            
+            msg = None
             while True:
                 try:
                     print("rx, closed=", closed)
@@ -585,6 +587,7 @@ def handle_asgi_request(wsgi_req, app):
                         "code": 1000,
                     }  # todo lookup code
                     # don't raise, keep receivin' ?
+                    continue
                 if msg:
                     # check wsgi_req->websocket_opcode for text / binary
                     value = {"type": "websocket.receive"}
@@ -624,15 +627,15 @@ def handle_asgi_request(wsgi_req, app):
 
             elif event["type"] == "websocket.send":
                 # ok to call during any part of app?
-                if "bytes" in msg:
+                if "bytes" in event:
                     msg = event["bytes"]
                     websocket_send = lib.uwsgi_websocket_send_binary
                 else:
                     msg = event["text"].encode("utf-8")
-                    websocket_send = lib.uwsgi
+                    websocket_send = lib.uwsgi_websocket_send
                 if websocket_send(wsgi_req, ffi.new("char[]", msg), len(msg)) < 0:
                     closed = True
-                    await send_({"type": "websocket.close"})
+                    await _send({"type": "websocket.close"})
                     raise IOError("unable to send websocket message")
 
             elif event["type"] == "websocket.close":

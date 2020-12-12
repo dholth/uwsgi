@@ -3,16 +3,31 @@ from starlette.responses import JSONResponse, HTMLResponse
 from starlette.websockets import WebSocket
 from starlette.routing import Route, Mount, WebSocketRoute
 
+import string
+
 import os
 import asyncio
 import asyncio_redis
 import sniffio
 
+import inspect
+import signal
+
+# pypy 7.3.3-beta0 doesn't have warn_on_full_buffer
+try:
+    argspec = inspect.getfullargspec(signal.set_wakeup_fd)
+    if not "warn_on_full_buffer" in argspec.kwonlyargs:
+        import trio._core._wakeup_socketpair
+
+        trio._core._wakeup_socketpair.HAVE_WARN_ON_FULL_BUFFER = False
+except TypeError:  # CPython
+    pass
+
 
 def get_template():
     with open(os.path.join(os.path.dirname(__file__), "starlettetest.html")) as tf:
         template = tf.read()
-    return template
+    return string.Template(template)
 
 
 REDIS_CHANNEL = "foobar"
@@ -22,7 +37,13 @@ async def homepage(request):
     ws_scheme = "wss"
     if request["scheme"] == "http":
         ws_scheme = "ws"
-    return HTMLResponse(get_template() % (ws_scheme, request.headers["host"]))
+    return HTMLResponse(
+        get_template().substitute(
+            protocol=ws_scheme,
+            path=request.headers["host"],
+            async_library=sniffio.current_async_library(),
+        )
+    )
 
 
 async def chat_endpoint(websocket: WebSocket):
@@ -42,20 +63,25 @@ async def chat_endpoint(websocket: WebSocket):
                 print("done receiving", event)
                 break
             msg = event["text"]
-            msg = event["text"]
             await connection.publish(REDIS_CHANNEL, msg)
         raise StopIteration()  # to cancel the wait
 
     async def right():
-        while True:
-            print("getting a redis message")
-            msg = await subscriber.next_published()
-            print("redis msg", msg)
-            if msg:
-                await websocket.send_text(msg.value)
-                if msg.value == "8k":
-                    # maybe switch contexts?
-                    await websocket.send_text("k" * 65536)
+        try:
+            while True:
+                print("getting a redis message")
+                msg = await subscriber.next_published()
+                print("redis msg", msg)
+                if msg:
+                    await websocket.send_text(msg.value)
+                    if msg.value == "8k":
+                        # maybe switch contexts?
+                        await websocket.send_text("k" * 65536)
+        except:
+            import traceback
+
+            traceback.print_exc()
+            raise
 
     loop = asyncio.get_event_loop()
 
@@ -85,7 +111,7 @@ async def redis_subscribe():
 
 
 app_to_wrap = Starlette(
-    debug=False,
+    debug=True,
     routes=[Route("/", homepage), WebSocketRoute("/foobar/", chat_endpoint)],
 )
 
