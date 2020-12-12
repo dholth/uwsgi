@@ -41,7 +41,7 @@ async def homepage(request):
         get_template().substitute(
             protocol=ws_scheme,
             path=request.headers["host"],
-            async_library=sniffio.current_async_library(),
+            async_library=ASYNC_LIBRARY
         )
     )
 
@@ -117,6 +117,8 @@ app_to_wrap = Starlette(
 
 
 async def app(scope, receive, send):
+    global ASYNC_LIBRARY
+    ASYNC_LIBRARY = sniffio.current_async_library()
     if sniffio.current_async_library() == "trio":
         import trio_asyncio
 
